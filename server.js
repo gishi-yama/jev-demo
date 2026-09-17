@@ -51,6 +51,43 @@ const QUESTION_SETS = {
   }
 };
 
+const MAX_REGISTER_WORDS = 80;
+
+// 文章を語句単位に分割し、語句ごとの独立Noul質問を動的生成する。
+// segments: 元の文章を再構成するための断片(語句/句読点・空白含む)。
+// questions: 語句のみを対象にした fan-out 質問マップ(id: w0, w1, ...)。
+function buildRegisterQuestions(text) {
+  const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
+  const segments = [];
+  const questions = {};
+  let wordIndex = 0;
+
+  for (const s of segmenter.segment(text)) {
+    const isWord = s.isWordLike && s.segment.trim().length > 0;
+    if (!isWord) {
+      segments.push({ text: s.segment, isWord: false, id: null });
+      continue;
+    }
+    if (wordIndex >= MAX_REGISTER_WORDS) {
+      segments.push({ text: s.segment, isWord: true, id: null });
+      continue;
+    }
+    const id = `w${wordIndex}`;
+    segments.push({ text: s.segment, isWord: true, id });
+    questions[id] = {
+      type: 'noul',
+      instructions: `文章「${text}」の中で、語句「${s.segment}」は話し言葉的な用法(口語・くだけた表現)として使われているか、書き言葉的な用法(文語・硬い表現)として使われているか判定せよ。`,
+      criteria: {
+        true: '話し言葉的(口語・くだけた表現)',
+        false: '書き言葉的(文語・硬い表現)'
+      }
+    };
+    wordIndex += 1;
+  }
+
+  return { segments, questions, truncated: wordIndex >= MAX_REGISTER_WORDS };
+}
+
 function serveStatic(req, res) {
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(PUBLIC_DIR, path.normalize(filePath));
@@ -107,6 +144,66 @@ const server = http.createServer((req, res) => {
         const data = await upstream.json();
         res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(data));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e && e.message ? e.message : e) }));
+      }
+    });
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/api/analyze-register') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { text, apiKey } = JSON.parse(body || '{}');
+        if (!apiKey) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'APIキー未入力' }));
+          return;
+        }
+        if (!text || !text.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: '文章未入力' }));
+          return;
+        }
+
+        const { segments, questions, truncated } = buildRegisterQuestions(text);
+        if (Object.keys(questions).length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: '判定対象の語句が見つからない' }));
+          return;
+        }
+
+        const upstream = await fetch('https://api.typesafe.ai/v1/systemone', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            state: text,
+            model: 'jev-latest',
+            questions
+          })
+        });
+
+        const data = await upstream.json();
+        if (!upstream.ok) {
+          res.writeHead(upstream.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(data));
+          return;
+        }
+
+        const answers = data.answers || {};
+        const words = segments.map((seg) => ({
+          text: seg.text,
+          isWord: seg.isWord,
+          spoken: seg.id && answers[seg.id] ? answers[seg.id].noul : null
+        }));
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ words, truncated }));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(e && e.message ? e.message : e) }));

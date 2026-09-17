@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jev 話し言葉・書き言葉 語句判定デモ</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa2af;
+    --accent: #59c3c3;
+    --written: #6ea8fe;
+    --spoken: #f0954d;
+    --bad: #e0596b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    padding: 24px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  a.nav-link { color: var(--accent); font-size: 13px; text-decoration: none; }
+  a.nav-link:hover { text-decoration: underline; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input[type="password"], textarea {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .preset-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--accent); }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  button.primary {
+    background: var(--accent);
+    color: #071617;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .status { font-size: 13px; color: var(--muted); }
+  .error { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+  .result-title { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; margin-left: 10px; }
+  .legend-swatch:first-child { margin-left: 0; }
+  .highlighted-text { font-size: 17px; line-height: 2.2; }
+  .word-span {
+    padding: 1px 2px;
+    border-radius: 3px;
+    cursor: default;
+    position: relative;
+  }
+  .placeholder { color: var(--muted); font-size: 13px; text-align: center; padding: 30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Jev 話し言葉・書き言葉 語句判定デモ</h1>
+  <div class="sub">
+    文章を語句単位に分解し、1語ずつ「話し言葉的」か「書き言葉的」かを同時判定する
+    &nbsp;|&nbsp; <a class="nav-link" href="/">意図判定デモ</a>
+    &nbsp;|&nbsp; <a class="nav-link" href="/subjectivity.html">主観・客観判定デモ</a>
+  </div>
+
+  <div class="panel">
+    <label for="apiKey">TypeSafe API キー</label>
+    <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+  </div>
+
+  <div class="panel">
+    <label for="text">対象の文章</label>
+    <textarea id="text" placeholder="例: いやー、まじそれ最高すぎるんだけど、マジでありがとう。"></textarea>
+    <div class="presets">
+      <button class="preset-btn" data-text="いやー、まじそれ最高すぎるんだけど、マジでありがとう。">くだけた話し言葉</button>
+      <button class="preset-btn" data-text="本製品は、優れた耐久性と高い信頼性を有する設計となっております。">硬い書き言葉</button>
+      <button class="preset-btn" data-text="そういうわけで、当該事案については引き続き検討する所存であります、まあ正直めんどくさいけど。">混在した文章</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="analyzeBtn">判定する</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="error" id="error"></div>
+    <div class="note">語句数の上限は80。超えた分は判定対象外(灰色表示)になる。</div>
+  </div>
+
+  <div class="panel" id="resultsPanel">
+    <div class="placeholder">文章を入力して「判定する」を押すと、ここに結果が表示される</div>
+  </div>
+</div>
+
+<script>
+const apiKeyEl = document.getElementById('apiKey');
+const textEl = document.getElementById('text');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const resultsPanel = document.getElementById('resultsPanel');
+
+document.querySelectorAll('.preset-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    textEl.value = btn.dataset.text;
+  });
+});
+
+function pct(n) { return Math.round(n * 100); }
+
+// 書き言葉/中間/話し言葉の3段階にくっきり分けた実色を返す(境界を跨ぐと色がはっきり切り替わる)
+function colorForSpoken(p) {
+  if (p >= 0.65) return { bg: '#f0954d', text: '#1a0f04' };   // 話し言葉: 濃いオレンジ
+  if (p <= 0.35) return { bg: '#3d7de0', text: '#f4f8ff' };   // 書き言葉: 濃い青
+  return { bg: '#5a6070', text: '#f4f6f9' };                  // 中間: グレー
+}
+
+function renderResults(data) {
+  const words = data.words || [];
+  let html = '<div class="result-title">語句ごとの判定</div>';
+  html += '<div class="legend">' +
+    '<span class="legend-swatch" style="background:#3d7de0"></span><span>書き言葉</span>' +
+    '<span class="legend-swatch" style="background:#5a6070"></span><span>中間</span>' +
+    '<span class="legend-swatch" style="background:#f0954d"></span><span>話し言葉</span>' +
+    '</div>';
+  html += '<div class="highlighted-text">';
+
+  words.forEach((w) => {
+    if (!w.isWord) {
+      html += escapeHtml(w.text);
+      return;
+    }
+    if (w.spoken === null || w.spoken === undefined) {
+      html += '<span class="word-span" style="background:transparent;color:var(--muted)" title="判定対象外">' + escapeHtml(w.text) + '</span>';
+      return;
+    }
+    const c = colorForSpoken(w.spoken);
+    html += '<span class="word-span" style="background:' + c.bg + ';color:' + c.text + '" title="話し言葉度: ' + pct(w.spoken) + '%">' + escapeHtml(w.text) + '</span>';
+  });
+
+  html += '</div>';
+  if (data.truncated) {
+    html += '<div class="note" style="margin-top:12px">語句数が上限を超えたため、一部は判定対象外(灰色)。</div>';
+  }
+  resultsPanel.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function analyze() {
+  const apiKey = apiKeyEl.value.trim();
+  const text = textEl.value.trim();
+  errorEl.textContent = '';
+
+  if (!apiKey) { errorEl.textContent = 'APIキーを入力'; return; }
+  if (!text) { errorEl.textContent = '文章を入力'; return; }
+
+  analyzeBtn.disabled = true;
+  statusEl.textContent = '判定中…';
+
+  try {
+    const res = await fetch('/api/analyze-register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, apiKey })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = 'エラー: ' + (data.error || res.status);
+      return;
+    }
+    renderResults(data);
+    statusEl.textContent = '';
+  } catch (e) {
+    errorEl.textContent = '通信エラー: ' + e.message;
+  } finally {
+    analyzeBtn.disabled = false;
+    statusEl.textContent = '';
+  }
+}
+
+analyzeBtn.addEventListener('click', analyze);
+textEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) analyze();
+});
+</script>
+</body>
+</html>
