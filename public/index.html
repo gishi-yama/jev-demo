@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jev リアルタイム意図判定デモ</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa2af;
+    --accent: #6ea8fe;
+    --good: #4caf82;
+    --warn: #e0a940;
+    --bad: #e0596b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    padding: 24px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input[type="password"], textarea {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .preset-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--accent); }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  button.primary {
+    background: var(--accent);
+    color: #08111f;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .status { font-size: 13px; color: var(--muted); }
+  .error { color: var(--bad); font-size: 13px; margin-top: 8px; }
+
+  .result-title { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+  .bar-label { width: 100px; flex-shrink: 0; color: var(--muted); }
+  .bar-track { flex: 1; height: 18px; background: var(--panel-2); border-radius: 4px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; background: var(--accent); transition: width 0.5s ease; }
+  .bar-fill.selected { background: var(--good); }
+  .bar-pct { width: 46px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .gauge-track { height: 22px; background: var(--panel-2); border-radius: 4px; position: relative; overflow: hidden; }
+  .gauge-fill { height: 100%; background: linear-gradient(90deg, var(--good), var(--warn), var(--bad)); width: 0%; transition: width 0.6s ease; }
+  .gauge-marker { position: absolute; top: -4px; width: 2px; height: 30px; background: #fff; transition: left 0.6s ease; }
+  .gauge-levels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .meter-wrap { display: flex; align-items: center; gap: 16px; }
+  .meter-circle {
+    width: 90px; height: 90px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700;
+    border: 6px solid var(--panel-2);
+    transition: border-color 0.4s ease, color 0.4s ease;
+  }
+  .meter-label { font-size: 14px; }
+  .meter-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .confidence-tag {
+    display: inline-block; font-size: 11px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 8px; margin-left: 6px;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .placeholder { color: var(--muted); font-size: 13px; text-align: center; padding: 30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Jev リアルタイム意図判定デモ</h1>
+  <div class="sub">同じ一文を「カテゴリ分類」「緊急度スコア」「本音検出」の3視点で同時に判定する</div>
+
+  <div class="panel">
+    <label for="apiKey">TypeSafe API キー</label>
+    <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+  </div>
+
+  <div class="panel">
+    <label for="text">対象の文章</label>
+    <textarea id="text" placeholder="例: いやー、素晴らしいサポートですね。問い合わせから3日も返信ないなんて。"></textarea>
+    <div class="presets">
+      <button class="preset-btn" data-text="いやー、素晴らしいサポートですね。問い合わせから3日も返信ないなんて。">皮肉な苦情</button>
+      <button class="preset-btn" data-text="対応早くて助かりました、ありがとうございます">素直な賞賛</button>
+      <button class="preset-btn" data-text="まあ、動くには動きますね">曖昧な感想</button>
+      <button class="preset-btn" data-text="アプリがさっきから起動しません。今日中に使う予定だったのに困ります。">直接的な苦情</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="analyzeBtn">判定する</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+
+  <div class="panel" id="resultsPanel">
+    <div class="placeholder">文章を入力して「判定する」を押すと、ここに結果が表示される</div>
+  </div>
+</div>
+
+<script>
+const apiKeyEl = document.getElementById('apiKey');
+const textEl = document.getElementById('text');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const resultsPanel = document.getElementById('resultsPanel');
+
+document.querySelectorAll('.preset-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    textEl.value = btn.dataset.text;
+  });
+});
+
+const CATEGORY_LABELS = {
+  refund: '返金希望',
+  bug_report: 'バグ報告',
+  how_to: '使い方質問',
+  praise: '賞賛',
+  other: 'その他'
+};
+
+const URGENCY_LEVELS = ['低', '中', '高', '緊急'];
+
+function pct(n) { return Math.round(n * 100); }
+
+function renderResults(data) {
+  const answers = data.answers || {};
+  const cat = answers.category;
+  const urg = answers.urgency;
+  const hidden = answers.hidden_complaint;
+
+  let html = '<div class="grid">';
+
+  // カテゴリ (Choice)
+  if (cat) {
+    html += '<div><div class="result-title">意図カテゴリ<span class="confidence-tag">confidence ' + pct(cat.confidence) + '%</span></div>';
+    const options = Object.keys(CATEGORY_LABELS);
+    options.forEach((key) => {
+      const p = cat.probabilities[key] || 0;
+      const isSelected = cat.choice === key;
+      html += '<div class="bar-row">' +
+        '<div class="bar-label">' + CATEGORY_LABELS[key] + '</div>' +
+        '<div class="bar-track"><div class="bar-fill' + (isSelected ? ' selected' : '') + '" style="width:' + pct(p) + '%"></div></div>' +
+        '<div class="bar-pct">' + pct(p) + '%</div>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+
+  // 緊急度 (Score)
+  if (urg) {
+    const maxLevel = URGENCY_LEVELS.length - 1;
+    const markerPct = (urg.score / maxLevel) * 100;
+    html += '<div><div class="result-title">緊急度<span class="confidence-tag">confidence ' + pct(urg.confidence) + '%</span></div>';
+    html += '<div class="gauge-track"><div class="gauge-fill" style="width:100%"></div><div class="gauge-marker" style="left:' + markerPct + '%"></div></div>';
+    html += '<div class="gauge-levels">' + URGENCY_LEVELS.map((l) => '<span>' + l + '</span>').join('') + '</div>';
+    html += '<div class="meter-sub">score: ' + urg.score.toFixed(2) + ' / ' + maxLevel + '</div></div>';
+  }
+
+  html += '</div>'; // grid
+
+  // 本音検出 (Noul) — 目玉
+  if (hidden) {
+    const p = hidden.noul;
+    const isHidden = p >= 0.5;
+    const color = isHidden ? 'var(--bad)' : 'var(--good)';
+    html += '<div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">';
+    html += '<div class="result-title">本音検出: 表面上ポジティブでも実は不満か？</div>';
+    html += '<div class="meter-wrap">';
+    html += '<div class="meter-circle" style="border-color:' + color + '; color:' + color + '">' + pct(p) + '%</div>';
+    html += '<div><div class="meter-label" style="color:' + color + '">' +
+      (isHidden ? '本音は不満・皮肉の可能性が高い' : '文面通りの内容と判定') +
+      '</div><div class="meter-sub">「不満を隠している」確率: ' + pct(p) + '%</div></div>';
+    html += '</div></div>';
+  }
+
+  resultsPanel.innerHTML = html;
+}
+
+async function analyze() {
+  const apiKey = apiKeyEl.value.trim();
+  const text = textEl.value.trim();
+  errorEl.textContent = '';
+
+  if (!apiKey) { errorEl.textContent = 'APIキーを入力'; return; }
+  if (!text) { errorEl.textContent = '文章を入力'; return; }
+
+  analyzeBtn.disabled = true;
+  statusEl.textContent = '判定中…';
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, apiKey })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = 'エラー: ' + (data.error || res.status);
+      return;
+    }
+    renderResults(data);
+    statusEl.textContent = '';
+  } catch (e) {
+    errorEl.textContent = '通信エラー: ' + e.message;
+  } finally {
+    analyzeBtn.disabled = false;
+    statusEl.textContent = '';
+  }
+}
+
+analyzeBtn.addEventListener('click', analyze);
+textEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) analyze();
+});
+</script>
+</body>
+</html>

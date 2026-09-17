@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jev 主観・客観判定デモ</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa2af;
+    --accent: #b98af6;
+    --good: #4caf82;
+    --bad: #e0a940;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    padding: 24px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  a.nav-link { color: var(--accent); font-size: 13px; text-decoration: none; }
+  a.nav-link:hover { text-decoration: underline; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input[type="password"], textarea {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .preset-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--accent); }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  button.primary {
+    background: var(--accent);
+    color: #17081f;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  .status { font-size: 13px; color: var(--muted); }
+  .error { color: var(--bad); font-size: 13px; margin-top: 8px; }
+
+  .result-title { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .meter-wrap { display: flex; align-items: center; gap: 16px; }
+  .meter-circle {
+    width: 90px; height: 90px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700;
+    border: 6px solid var(--panel-2);
+    transition: border-color 0.4s ease, color 0.4s ease;
+  }
+  .meter-label { font-size: 14px; }
+  .meter-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .confidence-tag {
+    display: inline-block; font-size: 11px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 8px; margin-left: 6px;
+  }
+  .placeholder { color: var(--muted); font-size: 13px; text-align: center; padding: 30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Jev 主観・客観判定デモ</h1>
+  <div class="sub">
+    文章が客観的事実の記述か、主観的な意見・感想の表明かを判定する
+    &nbsp;|&nbsp; <a class="nav-link" href="/">← 意図判定デモへ</a>
+  </div>
+
+  <div class="panel">
+    <label for="apiKey">TypeSafe API キー</label>
+    <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+  </div>
+
+  <div class="panel">
+    <label for="text">対象の文章</label>
+    <textarea id="text" placeholder="例: この製品の重量は450gで、バッテリー容量は3000mAhである。"></textarea>
+    <div class="presets">
+      <button class="preset-btn" data-text="この製品の重量は450gで、バッテリー容量は3000mAhである。">客観的な事実文</button>
+      <button class="preset-btn" data-text="正直、このデザインは今までで一番使いにくいと思う。">主観的な感想文</button>
+      <button class="preset-btn" data-text="発売から3年経つが、いまだに根強い人気があるようだ。">曖昧な例</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="analyzeBtn">判定する</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="error" id="error"></div>
+  </div>
+
+  <div class="panel" id="resultsPanel">
+    <div class="placeholder">文章を入力して「判定する」を押すと、ここに結果が表示される</div>
+  </div>
+</div>
+
+<script>
+const apiKeyEl = document.getElementById('apiKey');
+const textEl = document.getElementById('text');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const resultsPanel = document.getElementById('resultsPanel');
+
+document.querySelectorAll('.preset-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    textEl.value = btn.dataset.text;
+  });
+});
+
+function pct(n) { return Math.round(n * 100); }
+
+function renderResults(data) {
+  const answers = data.answers || {};
+  const subj = answers.subjectivity;
+  if (!subj) {
+    resultsPanel.innerHTML = '<div class="placeholder">結果を取得できなかった</div>';
+    return;
+  }
+
+  const p = subj.noul;
+  const isSubjective = p >= 0.5;
+  const color = isSubjective ? 'var(--accent)' : 'var(--good)';
+
+  let html = '<div class="result-title">主観・客観判定</div>';
+  html += '<div class="meter-wrap">';
+  html += '<div class="meter-circle" style="border-color:' + color + '; color:' + color + '">' + pct(p) + '%</div>';
+  html += '<div><div class="meter-label" style="color:' + color + '">' +
+    (isSubjective ? '主観的な意見・感想と判定' : '客観的な事実の記述と判定') +
+    '</div><div class="meter-sub">「主観的」と判定される確率: ' + pct(p) + '%</div></div>';
+  html += '</div>';
+
+  resultsPanel.innerHTML = html;
+}
+
+async function analyze() {
+  const apiKey = apiKeyEl.value.trim();
+  const text = textEl.value.trim();
+  errorEl.textContent = '';
+
+  if (!apiKey) { errorEl.textContent = 'APIキーを入力'; return; }
+  if (!text) { errorEl.textContent = '文章を入力'; return; }
+
+  analyzeBtn.disabled = true;
+  statusEl.textContent = '判定中…';
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, apiKey, mode: 'subjectivity' })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = 'エラー: ' + (data.error || res.status);
+      return;
+    }
+    renderResults(data);
+    statusEl.textContent = '';
+  } catch (e) {
+    errorEl.textContent = '通信エラー: ' + e.message;
+  } finally {
+    analyzeBtn.disabled = false;
+    statusEl.textContent = '';
+  }
+}
+
+analyzeBtn.addEventListener('click', analyze);
+textEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) analyze();
+});
+</script>
+</body>
+</html>
